@@ -5,19 +5,6 @@ import numpy as np
 
 from torch import sqrt
 
-def normc_fn(m):
-  """
-  This function multiplies the weights of a pytorch linear layer by a small
-  number so that outputs early in training are close to zero, which means 
-  that gradients are larger in magnitude. This means a richer gradient signal
-  is propagated back and speeds up learning (probably).
-  """
-  if m.__class__.__name__.find('Linear') != -1:
-    m.weight.data.normal_(0, 1)
-    m.weight.data *= 1 / torch.sqrt(m.weight.data.pow(2).sum(1, keepdim=True))
-    if m.bias is not None:
-      m.bias.data.fill_(0)
-
 def create_layers(layer_fn, input_dim, layer_sizes):
   """
   This function creates a pytorch modulelist and appends
@@ -41,9 +28,9 @@ class Net(nn.Module):
     #nn.Module.__init__(self)
     self.is_recurrent = False
 
-    self.welford_state_mean = torch.zeros(1)
-    self.welford_state_mean_diff = torch.ones(1)
-    self.welford_state_n = 1
+    self.state_mean = torch.zeros(1)
+    self.state_mean_diff = torch.ones(1)
+    self.state_n = 1
 
     self.env_name = None
 
@@ -56,30 +43,25 @@ class Net(nn.Module):
     """
     state = torch.Tensor(state)
 
-    if self.welford_state_n == 1:
-      self.welford_state_mean = torch.zeros(state.size(-1))
-      self.welford_state_mean_diff = torch.ones(state.size(-1))
+    if self.state_n == 1:
+      self.state_mean = torch.zeros(state.size(-1))
+      self.state_mean_diff = torch.ones(state.size(-1))
 
     if update:
       if len(state.size()) == 1: # if we get a single state vector 
-        state_old = self.welford_state_mean
-        self.welford_state_mean += (state - state_old) / self.welford_state_n
-        self.welford_state_mean_diff += (state - state_old) * (state - state_old)
-        self.welford_state_n += 1
+        state_old = self.state_mean
+        self.state_mean += (state - state_old) / self.state_n
+        self.state_mean_diff += (state - state_old) * (state - state_old)
+        self.state_n += 1
       else:
         raise RuntimeError # this really should not happen
-    return (state - self.welford_state_mean) / sqrt(self.welford_state_mean_diff / self.welford_state_n)
+    return (state - self.state_mean) / sqrt(self.state_mean_diff / self.state_n)
 
   def copy_normalizer_stats(self, net):
-    self.welford_state_mean      = net.welford_state_mean
-    self.welford_state_mean_diff = net.welford_state_mean_diff
-    self.welford_state_n         = net.welford_state_n
+    self.state_mean      = net.state_mean
+    self.state_mean_diff = net.state_mean_diff
+    self.state_n         = net.state_n
   
-  def initialize_parameters(self):
-    self.apply(normc_fn)
-    if hasattr(self, 'network_out'):
-      self.network_out.weight.data.mul_(0.01)
-
 class FF_Base(Net):
   """
   The base class for feedforward networks.

@@ -10,7 +10,7 @@ import random
 
 import pickle
 
-class CassieEnv_v2:
+class CassieEnv:
   def __init__(self, dynamics_randomization=False):
     self.sim = CassieSim("./cassie/cassiemujoco/cassie.xml")
     self.vis = None
@@ -37,18 +37,13 @@ class CassieEnv_v2:
 
     self.cassie_state = state_out_t()
 
-    self.simrate = 60      # simulate X mujoco steps with same pd target
-                           # 60 brings simulation from 2000Hz to roughly 30Hz
-
-    self.time    = 0 # number of time steps in current episode
-    self.phase   = 0 # portion of the phase the robot is in
-    self.counter = 0 # number of phase cycles completed in episode
+    self.simrate = 60 # simulate X mujoco steps with same pd target
+                      # 60 brings simulation from 2000Hz to roughly 30Hz
+    self.time    = 0  # number of time steps in current episode
+    self.phase   = 0  # portion of the phase the robot is in
+    self.counter = 0  # number of phase cycles completed in episode
 
     # NOTE: a reference trajectory represents ONE phase cycle
-
-    # should be floor(len(traj) / simrate) - 1
-    # should be VERY cautious here because wrapping around trajectory
-    # badly can cause assymetrical/bad gaits
     self.phaselen = floor(len(self.trajectory) / self.simrate) - 1
 
     # see include/cassiemujoco.h for meaning of these indices
@@ -88,7 +83,7 @@ class CassieEnv_v2:
 
       self.cassie_state = self.sim.step_pd(self.u)
 
-  def step(self, action, return_omniscient_state=False):
+  def step(self, action):
       for _ in range(self.simrate):
           self.step_simulation(action)
 
@@ -106,13 +101,12 @@ class CassieEnv_v2:
 
       reward = self.compute_reward()
 
-      # TODO: make 0.3 a variable/more transparent
       if reward < 0.3:
           done = True
 
       return self.get_full_state(), reward, done, {}
 
-  def reset(self, return_omniscient_state=False):
+  def reset(self):
       self.phase = random.randint(0, self.phaselen)
       self.time = 0
       self.counter = 0
@@ -237,7 +231,7 @@ class CassieEnv_v2:
 
       # left and right shin springs
       for i in [15, 29]:
-          target = ref_pos[i] # NOTE: in Xie et al spring target is 0
+          target = ref_pos[i]
           actual = qpos[i]
 
           spring_error += 1000 * (target - actual) ** 2      
@@ -267,8 +261,8 @@ class CassieEnv_v2:
       pos[0] += (self.trajectory.qpos[-1, 0] - self.trajectory.qpos[0, 0]) * self.counter * self.speed
       ######                          ########
 
-      # setting lateral distance target to 0?
-      # regardless of reference trajectory?
+      # setting lateral distance target to 0
+      # regardless of reference trajectory
       pos[1] = 0
 
       vel = np.copy(self.trajectory.qvel[phase * self.simrate])
@@ -280,7 +274,7 @@ class CassieEnv_v2:
       qpos = np.copy(self.sim.qpos())
       qvel = np.copy(self.sim.qvel()) 
 
-      ref_pos, ref_vel = self.get_ref_state(self.phase + self.phase_add)
+      ref_pos, _ = self.get_ref_state(self.phase + self.phase_add)
 
       clock = [np.sin(2 * np.pi *  self.phase / self.phaselen),
                np.cos(2 * np.pi *  self.phase / self.phaselen)]
@@ -290,17 +284,14 @@ class CassieEnv_v2:
       # Use state estimator
       robot_state = np.concatenate([
           [self.cassie_state.pelvis.position[2] - self.cassie_state.terrain.height], # pelvis height
-          self.cassie_state.pelvis.orientation[:],                                 # pelvis orientation
-          self.cassie_state.motor.position[:],                                     # actuated joint positions
-
-          self.cassie_state.pelvis.translationalVelocity[:],                       # pelvis translational velocity
-          self.cassie_state.pelvis.rotationalVelocity[:],                          # pelvis rotational velocity 
-          self.cassie_state.motor.velocity[:],                                     # actuated joint velocities
-
-          self.cassie_state.pelvis.translationalAcceleration[:],                   # pelvis translational acceleration
-          
-          self.cassie_state.joint.position[:],                                     # unactuated joint positions
-          self.cassie_state.joint.velocity[:]                                      # unactuated joint velocities
+          self.cassie_state.pelvis.orientation[:],                                   # pelvis orientation
+          self.cassie_state.motor.position[:],                                       # actuated joint positions
+          self.cassie_state.pelvis.translationalVelocity[:],                         # pelvis translational velocity
+          self.cassie_state.pelvis.rotationalVelocity[:],                            # pelvis rotational velocity 
+          self.cassie_state.motor.velocity[:],                                       # actuated joint velocities
+          self.cassie_state.pelvis.translationalAcceleration[:],                     # pelvis translational acceleration
+          self.cassie_state.joint.position[:],                                       # unactuated joint positions
+          self.cassie_state.joint.velocity[:]                                        # unactuated joint velocities
       ])
 
       return np.concatenate([robot_state, ext_state])
@@ -310,93 +301,3 @@ class CassieEnv_v2:
           self.vis = CassieVis(self.sim, "./cassie/cassiemujoco/cassie.xml")
 
       return self.vis.draw(self.sim)
-
-#nbody layout:
-# 0:  worldbody (zero)
-# 1:  pelvis
-
-# 2:  left hip roll 
-# 3:  left hip yaw
-# 4:  left hip pitch
-# 5:  left achilles rod
-# 6:  left knee
-# 7:  left knee spring
-# 8:  left shin
-# 9:  left tarsus
-# 10:  left heel spring
-# 12:  left foot crank
-# 12: left plantar rod
-# 13: left foot
-
-# 14: right hip roll 
-# 15: right hip yaw
-# 16: right hip pitch
-# 17: right achilles rod
-# 18: right knee
-# 19: right knee spring
-# 20: right shin
-# 21: right tarsus
-# 22: right heel spring
-# 23: right foot crank
-# 24: right plantar rod
-# 25: right foot
-
-
-# qpos layout
-# [ 0] Pelvis x
-# [ 1] Pelvis y
-# [ 2] Pelvis z
-# [ 3] Pelvis orientation qw
-# [ 4] Pelvis orientation qx
-# [ 5] Pelvis orientation qy
-# [ 6] Pelvis orientation qz
-# [ 7] Left hip roll         (Motor [0])
-# [ 8] Left hip yaw          (Motor [1])
-# [ 9] Left hip pitch        (Motor [2])
-# [10] Left achilles rod qw
-# [11] Left achilles rod qx
-# [12] Left achilles rod qy
-# [13] Left achilles rod qz
-# [14] Left knee             (Motor [3])
-# [15] Left shin                        (Joint [0])
-# [16] Left tarsus                      (Joint [1])
-# [17] Left heel spring
-# [18] Left foot crank
-# [19] Left plantar rod
-# [20] Left foot             (Motor [4], Joint [2])
-# [21] Right hip roll        (Motor [5])
-# [22] Right hip yaw         (Motor [6])
-# [23] Right hip pitch       (Motor [7])
-# [24] Right achilles rod qw
-# [25] Right achilles rod qx
-# [26] Right achilles rod qy
-# [27] Right achilles rod qz
-# [28] Right knee            (Motor [8])
-# [29] Right shin                       (Joint [3])
-# [30] Right tarsus                     (Joint [4])
-# [31] Right heel spring
-# [32] Right foot crank
-# [33] Right plantar rod
-# [34] Right foot            (Motor [9], Joint [5])
-
-# qvel layout
-# [ 0] Pelvis x
-# [ 1] Pelvis y
-# [ 2] Pelvis z
-# [ 3] Pelvis orientation wx
-# [ 4] Pelvis orientation wy
-# [ 5] Pelvis orientation wz
-# [ 6] Left hip roll         (Motor [0])
-# [ 7] Left hip yaw          (Motor [1])
-# [ 8] Left hip pitch        (Motor [2])
-# [ 9] Left knee             (Motor [3])
-# [10] Left shin                        (Joint [0])
-# [11] Left tarsus                      (Joint [1])
-# [12] Left foot             (Motor [4], Joint [2])
-# [13] Right hip roll        (Motor [5])
-# [14] Right hip yaw         (Motor [6])
-# [15] Right hip pitch       (Motor [7])
-# [16] Right knee            (Motor [8])
-# [17] Right shin                       (Joint [3])
-# [18] Right tarsus                     (Joint [4])
-# [19] Right foot            (Motor [9], Joint [5])

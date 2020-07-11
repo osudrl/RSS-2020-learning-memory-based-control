@@ -1,32 +1,30 @@
-"""Proximal Policy Optimization (clip objective)."""
-from copy import deepcopy
-import os
+"""
+Contains the code implementing Proximal Policy Optimization (PPO),
+with objective clipping and early termination if a KL threshold 
+is exceeded.
+"""
 
+import os
+import ray
 import torch
+import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 from torch.distributions import kl_divergence
-
 from torch.nn.utils.rnn import pad_sequence
-
+from copy import deepcopy
 from time import time
 
-import numpy as np
-
-import ray
-
 class Buffer:
+  """
+  A class representing the replay buffer used in PPO. Used
+  to states, actions, and reward/return, and then calculate
+  advantage from discounted sum of returns.
+  """
   def __init__(self, discount=0.99):
     self.discount = discount
-
-    self.clear()
-
-  def __len__(self):
-    return len(self.states)
-
-  def clear(self):
     self.states     = []
     self.actions    = []
     self.rewards    = []
@@ -34,13 +32,13 @@ class Buffer:
     self.returns    = []
     self.advantages = []
 
-    self.ep_returns = []
-    self.ep_lens = []
-
     self.size = 0
 
     self.traj_idx = [0]
     self.buffer_ready = False
+
+  def __len__(self):
+    return len(self.states)
 
   def push(self, state, action, reward, value, done=False):
     self.states  += [state]
@@ -63,9 +61,6 @@ class Buffer:
 
     self.returns += returns
 
-    self.ep_returns += [np.sum(rewards)]
-    self.ep_lens    += [len(rewards)]
-
   def _finish_buffer(self):
     self.states  = torch.Tensor(self.states)
     self.actions = torch.Tensor(self.actions)
@@ -83,18 +78,22 @@ class Buffer:
       self._finish_buffer()
 
     if recurrent:
+      """
+      If we are returning a sample for a recurrent network, we should
+      return a zero-padded tensor of size [traj_len, batch_size, dim],
+      or a trajectory of batched states/actions/returns.
+      """
       random_indices = SubsetRandomSampler(range(len(self.traj_idx)-1))
       sampler = BatchSampler(random_indices, batch_size, drop_last=True)
 
       for traj_indices in sampler:
-        states     = [self.states[self.traj_idx[i]:self.traj_idx[i+1]]          for i in traj_indices]
-        actions    = [self.actions[self.traj_idx[i]:self.traj_idx[i+1]]         for i in traj_indices]
-        returns    = [self.returns[self.traj_idx[i]:self.traj_idx[i+1]]         for i in traj_indices]
-        advantages = [self.advantages[self.traj_idx[i]:self.traj_idx[i+1]]      for i in traj_indices]
+        states     = [self.states[self.traj_idx[i]:self.traj_idx[i+1]]     for i in traj_indices]
+        actions    = [self.actions[self.traj_idx[i]:self.traj_idx[i+1]]    for i in traj_indices]
+        returns    = [self.returns[self.traj_idx[i]:self.traj_idx[i+1]]    for i in traj_indices]
+        advantages = [self.advantages[self.traj_idx[i]:self.traj_idx[i+1]] for i in traj_indices]
+
         traj_mask  = [torch.ones_like(r) for r in returns]
         
-        lens = [self.traj_idx[i+1] - self.traj_idx[i] for i in traj_indices[:-1]]
-
         states     = pad_sequence(states, batch_first=False)
         actions    = pad_sequence(actions, batch_first=False)
         returns    = pad_sequence(returns, batch_first=False)
@@ -104,6 +103,10 @@ class Buffer:
         yield states, actions, returns, advantages, traj_mask
 
     else:
+      """
+      If we are returning a sample for a conventional network, we should
+      return a tensor of size [batch_size, dim], or a batch of timesteps.
+      """
       random_indices = SubsetRandomSampler(range(self.size))
       sampler = BatchSampler(random_indices, batch_size, drop_last=True)
 
@@ -117,6 +120,10 @@ class Buffer:
 
 @ray.remote
 class PPO_Worker:
+  """
+  A class representing a parallel worker used to explore the
+  environment.
+  """
   def __init__(self, actor, critic, env_fn, gamma):
     torch.set_num_threads(1)
     self.gamma = gamma
@@ -124,7 +131,7 @@ class PPO_Worker:
     self.critic = deepcopy(critic)
     self.env = env_fn()
 
-  def update_policy(self, new_actor_params, new_critic_params, input_norm=None):
+  def sync_policy(self, new_actor_params, new_critic_params, input_norm=None):
     for p, new_p in zip(self.actor.parameters(), new_actor_params):
       p.data.copy_(new_p)
 
@@ -132,7 +139,7 @@ class PPO_Worker:
       p.data.copy_(new_p)
 
     if input_norm is not None:
-      self.actor.welford_state_mean, self.actor.welford_state_mean_diff, self.actor.welford_state_n = input_norm
+      self.actor.state_mean, self.actor.state_mean_diff, self.actor.state_n = input_norm
 
   def collect_experience(self, max_traj_len, min_steps):
     with torch.no_grad():
@@ -158,9 +165,8 @@ class PPO_Worker:
 
         while not done and traj_len < max_traj_len:
             state = torch.Tensor(state)
-            norm_state = actor.normalize_state(state, update=False)
-            action = actor(norm_state, False)
-            value = critic(norm_state)
+            action = actor(state, False)
+            value = critic(state)
 
             next_state, reward, done, _ = self.env.step(action.numpy())
 
@@ -205,29 +211,25 @@ class PPO:
 
       self.workers = [PPO_Worker.remote(actor, critic, env_fn, args.discount) for _ in range(args.workers)]
 
-    def update_policy(self, states, actions, returns, advantages, mask):
+    def sync_policy(self, states, actions, returns, advantages, mask):
       with torch.no_grad():
-        states = self.actor.normalize_state(states, update=False)
-        old_pdf = self.old_actor.pdf(states)
+        old_pdf       = self.old_actor.pdf(states)
         old_log_probs = old_pdf.log_prob(actions).sum(-1, keepdim=True)
 
-      pdf = self.actor.pdf(states)
-      
-      log_probs = pdf.log_prob(actions).sum(-1, keepdim=True)
+      pdf        = self.actor.pdf(states)
+      log_probs  = pdf.log_prob(actions).sum(-1, keepdim=True)
 
-      ratio = ((log_probs - old_log_probs)).exp()
-      cpi_loss = ratio * advantages * mask
-      clip_loss = ratio.clamp(0.8, 1.2) * advantages * mask
+      ratio      = ((log_probs - old_log_probs)).exp()
+      cpi_loss   = ratio * advantages * mask
+      clip_loss  = ratio.clamp(0.8, 1.2) * advantages * mask
       actor_loss = -torch.min(cpi_loss, clip_loss).mean()
 
       critic_loss = 0.5 * ((returns - self.critic(states)) * mask).pow(2).mean()
 
-      entropy_penalty = -(self.entropy_coeff * pdf.entropy() * mask).mean()
-
       self.actor_optim.zero_grad()
       self.critic_optim.zero_grad()
 
-      (actor_loss + entropy_penalty).backward()
+      actor_loss.backward()
       critic_loss.backward()
 
       torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.grad_clip)
@@ -236,7 +238,7 @@ class PPO:
       self.critic_optim.step()
 
       with torch.no_grad():
-        return kl_divergence(pdf, old_pdf).mean().numpy(), ((actor_loss + entropy_penalty).item(), critic_loss.item())
+        return kl_divergence(pdf, old_pdf).mean().numpy(), ((actor_loss).item(), critic_loss.item())
 
     def merge_buffers(self, buffers):
       memory = Buffer()
@@ -250,9 +252,6 @@ class PPO:
         memory.values  += b.values
         memory.returns += b.returns
 
-        memory.ep_returns += b.ep_returns
-        memory.ep_lens    += b.ep_lens
-
         memory.traj_idx += [offset + i for i in b.traj_idx[1:]]
         memory.size     += b.size
       return memory
@@ -263,12 +262,13 @@ class PPO:
       start = time()
       actor_param_id  = ray.put(list(self.actor.parameters()))
       critic_param_id = ray.put(list(self.critic.parameters()))
-      norm_id = ray.put([self.actor.welford_state_mean, self.actor.welford_state_mean_diff, self.actor.welford_state_n])
+      norm_id = ray.put([self.actor.state_mean, self.actor.state_mean_diff, self.actor.state_n])
 
       steps = max(num_steps // len(self.workers), max_traj_len)
 
       for w in self.workers:
-        w.update_policy.remote(actor_param_id, critic_param_id, input_norm=norm_id)
+        w.sync_policy.remote(actor_param_id, critic_param_id, input_norm=norm_id)
+
       if verbose:
         print("\t{:5.4f}s to copy policy params to workers.".format(time() - start))
 
@@ -290,7 +290,7 @@ class PPO:
         for batch in memory.sample(batch_size=batch_size, recurrent=self.recurrent):
           states, actions, returns, advantages, mask = batch
           
-          kl, losses = self.update_policy(states, actions, returns, advantages, mask)
+          kl, losses = self.sync_policy(states, actions, returns, advantages, mask)
           kls += [kl]
           a_loss += [losses[0]]
           c_loss += [losses[1]]
@@ -310,43 +310,10 @@ class PPO:
         print("\t{:3.2f}s to update policy.".format(time() - start))
       return np.mean(kls), np.mean(a_loss), np.mean(c_loss), len(memory)
 
-def eval_policy(policy, env, update_normalizer, min_timesteps=2000, max_traj_len=400, verbose=True, noise=None):
-  with torch.no_grad():
-    steps = 0
-    ep_returns = []
-    while steps < min_timesteps:
-      env.dynamics_randomization = False
-      state = torch.Tensor(env.reset())
-      done = False
-      traj_len = 0
-      ep_return = 0
-
-      if hasattr(policy, 'init_hidden_state'):
-        policy.init_hidden_state()
-
-      while not done and traj_len < max_traj_len:
-        state = policy.normalize_state(state, update=update_normalizer)
-        action = policy(state, deterministic=True)
-        if noise is not None:
-          action = action + torch.randn(action.size()) * noise
-        next_state, reward, done, _ = env.step(action.numpy())
-        state = torch.Tensor(next_state)
-        ep_return += reward
-        traj_len += 1
-        steps += 1
-        if verbose:
-          print("Evaluating {:5d}/{:5d}".format(steps, min_timesteps), end="\r")
-      ep_returns += [ep_return]
-
-  print()
-  return np.mean(ep_returns)
-  
-
 def run_experiment(args):
     torch.set_num_threads(1)
 
-    from util.env import env_factory
-    from util.log import create_logger
+    from util import create_logger, env_factory, eval_policy, train_normalizer
 
     from policies.critic import FF_V, LSTM_V
     from policies.actor import FF_Stochastic_Actor, LSTM_Stochastic_Actor
@@ -355,26 +322,36 @@ def run_experiment(args):
     locale.setlocale(locale.LC_ALL, '')
 
     # wrapper function for creating parallelized envs
-    env_fn = env_factory(args.env_name)
-    obs_dim = env_fn().observation_space.shape[0]
+    env_fn     = env_factory(args.randomize)
+    obs_dim    = env_fn().observation_space.shape[0]
     action_dim = env_fn().action_space.shape[0]
+    layers     = [int(x) for x in args.layers.split(',')]
 
     # Set seeds
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
     if args.recurrent:
-      policy = LSTM_Stochastic_Actor(obs_dim, action_dim, env_name=args.env_name, fixed_std=torch.ones(action_dim)*args.std)
-      critic = LSTM_V(obs_dim)
+      policy = LSTM_Stochastic_Actor(obs_dim, action_dim,\
+                                     layers=layers, 
+                                     dynamics_randomization=args.randomize, 
+                                     fixed_std=torch.ones(action_dim)*args.std)
+      critic = LSTM_V(obs_dim, layers=layers)
     else:
-      policy = FF_Stochastic_Actor(obs_dim, action_dim, layers=(300,300), env_name=args.env_name, fixed_std=torch.ones(action_dim)*args.std)
-      critic = FF_V(obs_dim)
+      policy = FF_Stochastic_Actor(obs_dim, action_dim,\
+                                   layers=layers, 
+                                   dynamics_randomization=args.randomize, 
+                                   fixed_std=torch.ones(action_dim)*args.std)
+      critic = FF_V(obs_dim, layers=layers)
 
     env = env_fn()
-    eval_policy(policy, env, True, min_timesteps=args.prenormalize_steps, max_traj_len=args.traj_len, noise=1)
 
     policy.train(0)
     critic.train(0)
+
+    print("Collecting normalization statistics with {} states...".format(args.prenormalize_steps))
+    train_normalizer(policy, args.prenormalize_steps, max_traj_len=args.traj_len, noise=1)
+    critic.copy_normalizer_stats(policy)
 
     algo = PPO(policy, critic, env_fn, args)
 
@@ -393,7 +370,6 @@ def run_experiment(args):
     print()
     print("Proximal Policy Optimization:")
     print("\tseed:               {}".format(args.seed))
-    print("\tenv:                {}".format(args.env_name))
     print("\ttimesteps:          {:n}".format(int(args.timesteps)))
     print("\titeration steps:    {:n}".format(int(args.num_steps)))
     print("\tprenormalize steps: {}".format(int(args.prenormalize_steps)))
@@ -414,7 +390,7 @@ def run_experiment(args):
     best_reward = None
     while timesteps < args.timesteps:
       kl, a_loss, c_loss, steps = algo.do_iteration(args.num_steps, args.traj_len, args.epochs, batch_size=args.batch_size, kl_thresh=args.kl)
-      eval_reward = eval_policy(algo.actor, env, False, min_timesteps=args.traj_len*5, max_traj_len=args.traj_len, verbose=False)
+      eval_reward = eval_policy(algo.actor, env, episodes=5, max_traj_len=args.traj_len, verbose=False, visualize=False)
 
       timesteps += steps
       print("iter {:4d} | return: {:5.2f} | KL {:5.4f} | timesteps {:n}".format(itr, eval_reward, kl, timesteps))
@@ -429,9 +405,9 @@ def run_experiment(args):
           torch.save(algo.critic, args.save_critic)
 
       if logger is not None:
-        logger.add_scalar(args.env_name + '/kl', kl, itr)
-        logger.add_scalar(args.env_name + '/return', eval_reward, itr)
-        logger.add_scalar(args.env_name + '/actor_loss', a_loss, itr)
-        logger.add_scalar(args.env_name + '/critic_loss', c_loss, itr)
+        logger.add_scalar('cassie/kl', kl, itr)
+        logger.add_scalar('cassie/return', eval_reward, itr)
+        logger.add_scalar('cassie/actor_loss', a_loss, itr)
+        logger.add_scalar('cassie/critic_loss', c_loss, itr)
       itr += 1
     print("Finished ({} of {}).".format(timesteps, args.timesteps))

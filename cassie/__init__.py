@@ -1,2 +1,2 @@
-from .cassie import CassieEnv_v2
+from .cassie import CassieEnv
 from .cassiemujoco import *

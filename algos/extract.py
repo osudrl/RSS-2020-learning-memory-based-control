@@ -7,7 +7,7 @@ import locale, os, time
 
 from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 from copy import deepcopy
-from policies.fit import Model
+from nn.fit import Model
 from util import env_factory
 
 def get_hiddens(policy):

@@ -314,8 +314,8 @@ def run_experiment(args):
 
     from util import create_logger, env_factory, eval_policy, train_normalizer
 
-    from policies.critic import FF_V, LSTM_V
-    from policies.actor import FF_Stochastic_Actor, LSTM_Stochastic_Actor
+    from nn.critic import FF_V, LSTM_V
+    from nn.actor import FF_Stochastic_Actor, LSTM_Stochastic_Actor
 
     import locale, os
     locale.setlocale(locale.LC_ALL, '')

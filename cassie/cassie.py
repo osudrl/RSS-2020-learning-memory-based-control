@@ -253,7 +253,7 @@ class CassieEnv:
     return np.array(self.sim.get_body_mass())
 
   def get_ipos(self):
-    return np.array(self.sim.get_body_ipos()[:3])
+    return np.array(self.sim.get_body_ipos()[3:6])
 
   # get the corresponding state from the reference trajectory for the current phase
   def get_ref_state(self, phase=None):

@@ -136,16 +136,16 @@ def run_experiment(args):
     x      = torch.load(os.path.join(logger.dir, 'train_latents.pt'))
     test_x = torch.load(os.path.join(logger.dir, 'test_latents.pt'))
 
-    train_damps  = torch.load(os.path.join(logger.dir, 'train_damps.pt'))
+    damps  = torch.load(os.path.join(logger.dir, 'train_damps.pt'))
     test_damps   = torch.load(os.path.join(logger.dir, 'test_damps.pt'))
 
-    train_masses = torch.load(os.path.join(logger.dir, 'train_masses.pt'))
+    masses = torch.load(os.path.join(logger.dir, 'train_masses.pt'))
     test_masses  = torch.load(os.path.join(logger.dir, 'test_masses.pt'))
 
-    train_ipos  = torch.load(os.path.join(logger.dir, 'train_ipos.pt'))
+    ipos  = torch.load(os.path.join(logger.dir, 'train_ipos.pt'))
     test_ipos   = torch.load(os.path.join(logger.dir, 'test_ipos.pt'))
 
-    if args.points > len(x) + len(y):
+    if args.points > len(x) + len(test_x):
       create_new = True
     else:
       create_new = False

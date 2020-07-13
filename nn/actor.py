@@ -13,6 +13,7 @@ class Stochastic_Actor:
     self.action_dim             = action_dim
     self.dynamics_randomization = dynamics_randomization
     self.means                  = nn.Linear(latent, action_dim)
+    self.nn_type                = 'policy'
 
     self.fixed_std = fixed_std
 

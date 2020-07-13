@@ -12,10 +12,10 @@ class Model(FF_Base):
   def __init__(self, state_dim, output_dim, layers=(512,256), nonlinearity=torch.tanh):
     super(Model, self).__init__(state_dim, layers, nonlinearity)
 
-    self.network_out = nn.Linear(layers[-1], output_dim)
-
-    self.output_dim = output_dim
+    self.network_out  = nn.Linear(layers[-1], output_dim)
+    self.output_dim   = output_dim
     self.nonlinearity = nonlinearity
+    self.nn_type      = 'extractor'
 
   def forward(self, x):
     x = self._base_forward(x)

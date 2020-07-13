@@ -90,7 +90,7 @@ def concat(datalist):
     damp, mass, quat, latent = l
     damps  += damp
     masses += mass
-    ipos  += quat
+    ipos   += quat
 
     latents += latent
   damps   = torch.tensor(damps).float()
@@ -122,16 +122,18 @@ def run_experiment(args):
   opts   = []
   for fn in [env.get_damping, env.get_mass, env.get_ipos]:
     output_dim = fn().shape[0]
-    model = Model(latent_dim, output_dim, layers=layers)
+    model      = Model(latent_dim, output_dim, layers=layers)
+
     models += [model]
     opts   += [optim.Adam(model.parameters(), lr=args.lr, eps=1e-5)]
+
+    model.policy_path = args.policy
 
   logger = create_logger(args)
 
   best_loss = None
   actor_dir = os.path.split(args.policy)[0]
   create_new = True
-  print(os.path.join(logger.dir, 'test_latents.pt'))
   if os.path.exists(os.path.join(logger.dir, 'test_latents.pt')):
     x      = torch.load(os.path.join(logger.dir, 'train_latents.pt'))
     test_x = torch.load(os.path.join(logger.dir, 'test_latents.pt'))
@@ -186,7 +188,6 @@ def run_experiment(args):
 
     torch.save(ipos, os.path.join(logger.dir, 'train_ipos.pt'))
     torch.save(test_ipos, os.path.join(logger.dir, 'test_ipos.pt'))
-    print('saving to', os.path.join(logger.dir, 'test_ipos.pt'))
 
   for epoch in range(args.epochs):
 

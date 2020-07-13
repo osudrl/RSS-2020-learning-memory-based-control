@@ -22,11 +22,6 @@ def create_logger(args):
   else:
     seed = None
   
-  task_name = 'cassie'
-  if 'policy' in arg_dict:
-    task_name = os.path.normpath(arg_dict.pop('policy')).split(os.path.sep)
-    task_name = '-'.join([x for x in task_name[-4:-1]])
-
   logdir = str(arg_dict.pop('logdir'))
 
   # get a unique hash for the hyperparameter settings, truncated at 10 chars
@@ -35,7 +30,6 @@ def create_logger(args):
   else:
     arg_hash   = hashlib.md5(str(arg_dict).encode('ascii')).hexdigest()[0:6] + '-seed' + seed
 
-  logdir     = os.path.join(logdir, task_name)
   output_dir = os.path.join(logdir, arg_hash)
 
   # create a directory with the hyperparm hash as its name, if it doesn't
@@ -50,9 +44,6 @@ def create_logger(args):
       file.write('\n')
 
   logger = SummaryWriter(output_dir, flush_secs=0.1)
-  print("Logging to " + str(output_dir))
-
-  logger.taskname = task_name
   logger.dir = output_dir
   logger.arg_hash = arg_hash
   return logger
@@ -72,16 +63,14 @@ def train_normalizer(policy, min_timesteps, max_traj_len=1000, noise=0.5):
         policy.init_hidden_state()
 
       while not done and timesteps < max_traj_len:
-        if noise is None:
-          action = policy.forward(state, update_norm=True, deterministic=False).numpy()
-        else:
-          action = policy.forward(state, update_norm=True).numpy() + np.random.normal(0, noise, size=policy.action_dim)
-
+        action = policy.forward(state, update_norm=True).numpy() + np.random.normal(0, noise, size=policy.action_dim)
         state, _, done, _ = env.step(action)
         timesteps += 1
         total_t += 1
 
-def eval_policy(policy, env, episodes=1, max_traj_len=400, verbose=True, visualize=False):
+def eval_policy(policy, env=None, episodes=5, max_traj_len=400, verbose=True, visualize=False):
+  if env is None:
+    env = env_factory(False)()
   with torch.no_grad():
     steps = 0
     ep_returns = []
@@ -105,6 +94,8 @@ def eval_policy(policy, env, episodes=1, max_traj_len=400, verbose=True, visuali
         traj_len += 1
         steps += 1
       ep_returns += [ep_return]
+      if verbose:
+        print('Return: {:6.2f}'.format(ep_return))
 
   return np.mean(ep_returns)
   

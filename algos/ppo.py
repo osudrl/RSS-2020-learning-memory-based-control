@@ -200,7 +200,6 @@ class PPO:
       self.critic_optim = optim.Adam(self.critic.parameters(), lr=args.c_lr, eps=args.eps)
       self.env_fn = env_fn
       self.discount = args.discount
-      self.entropy_coeff = args.entropy_coeff
       self.grad_clip = args.grad_clip
 
       if not ray.is_initialized():
@@ -371,17 +370,17 @@ def run_experiment(args):
     print("Proximal Policy Optimization:")
     print("\tseed:               {}".format(args.seed))
     print("\ttimesteps:          {:n}".format(int(args.timesteps)))
-    print("\titeration steps:    {:n}".format(int(args.num_steps)))
+    print("\titeration steps:    {:n}".format(int(args.sample)))
     print("\tprenormalize steps: {}".format(int(args.prenormalize_steps)))
     print("\ttraj_len:           {}".format(args.traj_len))
     print("\tdiscount:           {}".format(args.discount))
     print("\tactor_lr:           {}".format(args.a_lr))
     print("\tcritic_lr:          {}".format(args.c_lr))
-    print("\tadam eps:           {}".format(args.eps))
-    print("\tentropy coeff:      {}".format(args.entropy_coeff))
     print("\tgrad clip:          {}".format(args.grad_clip))
     print("\tbatch size:         {}".format(args.batch_size))
     print("\tepochs:             {}".format(args.epochs))
+    print("\trecurrent:          {}".format(args.recurrent))
+    print("\tdynamics rand:      {}".format(args.randomize))
     print("\tworkers:            {}".format(args.workers))
     print()
 
@@ -389,7 +388,7 @@ def run_experiment(args):
     timesteps = 0
     best_reward = None
     while timesteps < args.timesteps:
-      kl, a_loss, c_loss, steps = algo.do_iteration(args.num_steps, args.traj_len, args.epochs, batch_size=args.batch_size, kl_thresh=args.kl)
+      kl, a_loss, c_loss, steps = algo.do_iteration(args.sample, args.traj_len, args.epochs, batch_size=args.batch_size, kl_thresh=args.kl)
       eval_reward = eval_policy(algo.actor, env, episodes=5, max_traj_len=args.traj_len, verbose=False, visualize=False)
 
       timesteps += steps

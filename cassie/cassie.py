@@ -246,6 +246,15 @@ class CassieEnv:
 
       return reward
 
+  def get_damping(self):
+    return np.array(self.sim.get_dof_damping())
+
+  def get_mass(self):
+    return np.array(self.sim.get_body_mass())
+
+  def get_ipos(self):
+    return np.array(self.sim.get_body_ipos()[:3])
+
   # get the corresponding state from the reference trajectory for the current phase
   def get_ref_state(self, phase=None):
       if phase is None:

@@ -203,10 +203,7 @@ class PPO:
       self.grad_clip = args.grad_clip
 
       if not ray.is_initialized():
-        if args.redis is not None:
-          ray.init(redis_address=args.redis)
-        else:
-          ray.init(num_cpus=args.workers)
+        ray.init(num_cpus=args.workers)
 
       self.workers = [PPO_Worker.remote(actor, critic, env_fn, args.discount) for _ in range(args.workers)]
 

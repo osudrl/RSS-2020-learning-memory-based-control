@@ -221,12 +221,13 @@ def run_experiment(args):
 
         preds = model(test_x)
         test_loss  = 0.5 * (y_te - preds).pow(2).mean().item()
-        pce = torch.mean(torch.abs((y_te - preds)/ (y_te + 1e-5)))
+        pce = torch.mean(torch.abs((y_te - preds) / (y_te + 1e-5)))
         err = torch.mean(torch.abs((y_te - preds)))
         
         logger.add_scalar(logger.arg_hash + '/' + name + '_loss', test_loss, epoch)
         logger.add_scalar(logger.arg_hash + '/' + name + '_percenterr', pce, epoch)
         logger.add_scalar(logger.arg_hash + '/' + name + '_abserr', err, epoch)
+        model.dyn_parameter = name
         torch.save(model, os.path.join(logger.dir, name + '_extractor.pt'))
         print("\t{:16s}: train loss {:7.6f} test loss {:7.6f}, err {:5.4f}, percent err {:3.2f}".format(name, loss_total, test_loss, err, pce))
 

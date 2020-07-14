@@ -68,9 +68,15 @@ def train_normalizer(policy, min_timesteps, max_traj_len=1000, noise=0.5):
         timesteps += 1
         total_t += 1
 
-def eval_policy(policy, env=None, episodes=5, max_traj_len=400, verbose=True, visualize=False):
+def eval_policy(model, env=None, episodes=5, max_traj_len=400, verbose=True, visualize=False):
   if env is None:
     env = env_factory(False)()
+
+  if model.nn_type == 'policy':
+    policy = model
+  elif model.nn_type == 'extractor':
+    policy = torch.load(model.policy_path)
+
   with torch.no_grad():
     steps = 0
     ep_returns = []
@@ -86,6 +92,7 @@ def eval_policy(policy, env=None, episodes=5, max_traj_len=400, verbose=True, vi
 
       while not done and traj_len < max_traj_len:
         action = policy(state)
+        env.speed = 1
         next_state, reward, done, _ = env.step(action.numpy())
         if visualize:
           env.render()
@@ -93,6 +100,10 @@ def eval_policy(policy, env=None, episodes=5, max_traj_len=400, verbose=True, vi
         ep_return += reward
         traj_len += 1
         steps += 1
+
+        if model.nn_type == 'extractor':
+          pass
+
       ep_returns += [ep_return]
       if verbose:
         print('Return: {:6.2f}'.format(ep_return))

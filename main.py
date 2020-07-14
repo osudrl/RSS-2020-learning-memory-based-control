@@ -16,13 +16,15 @@ if __name__ == "__main__":
     from util import eval_policy
     import torch
 
-    parser.add_argument("--policy",   default=None, type=str)
+    model = sys.argv[1]
+    sys.argv.remove(sys.argv[1])
+
     parser.add_argument("--traj_len", default=300, type=int)
     args = parser.parse_args()
 
-    policy = torch.load(args.policy)
+    model = torch.load(model)
 
-    eval_policy(policy, max_traj_len=args.traj_len, visualize=True, verbose=True)
+    eval_policy(model, max_traj_len=args.traj_len, visualize=True, verbose=True)
     exit()
 
   if option == 'cassie':
@@ -88,5 +90,18 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     run_experiment(args)
+
+  elif option == 'pca':
+    from algos.pca import run_pca
+    import torch
+    model = sys.argv[1]
+    sys.argv.remove(sys.argv[1])
+
+
+    model = torch.load(model)
+
+    run_pca(model)
+    exit()
+
   else:
     print("Invalid option '{}'".format(option))
